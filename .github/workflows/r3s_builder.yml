@@ -63,30 +63,24 @@ jobs:
           echo "status=success" >> $GITHUB_OUTPUT
 
       - name: Organize Files
-        if: steps.compile.outputs.status == 'success'
         run: |
-          # 1. 整理固件 (镜像文件)
-          mkdir -p publish_firmware
-          cp openwrt/bin/targets/*/*/*img.gz publish_firmware/ 2>/dev/null || true
-          cp openwrt/bin/targets/*/*/*.manifest publish_firmware/ 2>/dev/null || true
-          
-          # 2. 整理软件包 (所有编译出来的 .apk 或 .ipk)
-          # 我们把整个 bin/packages 目录打包，这样它包含了索引文件，以后可以做私有仓库
-          tar -zcvf openwrt_packages.tar.gz -C openwrt/bin/ packages/
-          
-          echo "FIRMWARE_DIR=$PWD/publish_firmware" >> $GITHUB_ENV
-          echo "PACKAGES_ARCHIVE=$PWD/openwrt_packages.tar.gz" >> $GITHUB_ENV
+          # 进入固件目录
+          cd openwrt/bin/targets/*/*
+          # 记录当前路径（固件和 kmods 所在地）
+          echo "FIRMWARE_DIR=$PWD" >> $GITHUB_ENV
+          # 删除固件目录下的 packages 副本，节省上传时间和空间
+          rm -rf packages
 
-      - name: Upload Firmware Image
+      - name: Upload Firmware and Kmods
         uses: actions/upload-artifact@v4
-        if: steps.compile.outputs.status == 'success'
         with:
-          name: OpenWrt_R3S_Images
+          name: OpenWrt_R3S_Firmware
+          # 这里包含：固件镜像 + kmods 文件夹
           path: ${{ env.FIRMWARE_DIR }}/*
 
-      - name: Upload All Packages
+      - name: Upload All App Packages
         uses: actions/upload-artifact@v4
-        if: steps.compile.outputs.status == 'success'
         with:
-          name: OpenWrt_R3S_All_Packages
-          path: ${{ env.PACKAGES_ARCHIVE }}
+          name: OpenWrt_R3S_All_Apps
+          # 这里包含：bin/packages 目录下所有的插件包
+          path: openwrt/bin/packages/
