@@ -66,27 +66,30 @@ jobs:
         if: steps.compile.outputs.status == 'success'
         run: |
           cd openwrt/bin/targets/*/*
-      
+
           # 1. 记录固件路径
           echo "FIRMWARE_DIR=$PWD" >> $GITHUB_ENV
-      
-          # 2. 收集所有 APK 包（必须在删除之前完成）
+
+          # 2. 收集所有 APK 包，保留原始目录结构
           mkdir -p $GITHUB_WORKSPACE/all_apks
-      
+
+          # 切换到 bin 目录，以便 cp --parents 以 packages/ 和 targets/ 为相对根路径
+          cd $GITHUB_WORKSPACE/openwrt/bin
+
           # 通用软件包（luci、base、packages 等 feeds）
-          find $GITHUB_WORKSPACE/openwrt/bin/packages/ -type f -name "*.apk" \
-            -exec cp {} $GITHUB_WORKSPACE/all_apks/ \;
-      
-          # 内核模块包（kmods）—— 直接搜 targets 下所有 .apk
-          find $GITHUB_WORKSPACE/openwrt/bin/targets/ -type f -name "*.apk" \
-            -exec cp {} $GITHUB_WORKSPACE/all_apks/ \;
-      
-          # 3. 删除不需要的大型包（ImageBuilder, Toolchain, Debug）
+          find packages/ -type f -name "*.apk" \
+            -exec cp --parents -t $GITHUB_WORKSPACE/all_apks/ {} +
+
+          # 内核模块包（kmods）
+          find targets/ -type f -name "*.apk" \
+            -exec cp --parents -t $GITHUB_WORKSPACE/all_apks/ {} +
+
+          # 3. 回到固件目录，删除不需要的大型包
+          cd $GITHUB_WORKSPACE/openwrt/bin/targets/*/*
           rm -rf openwrt-imagebuilder-*
           rm -rf openwrt-toolchain-*
           rm -rf kernel-debug.tar.zst
           rm -rf packages
-
 
       - name: Upload Firmware
         uses: actions/upload-artifact@v4
@@ -94,13 +97,14 @@ jobs:
         with:
           name: OpenWrt_R3S_Pure_Firmware
           path: |
-            ${{ env.FIRMWARE_DIR }}/*.img.gz
-            ${{ env.FIRMWARE_DIR }}/*.buildinfo
-            ${{ env.FIRMWARE_DIR }}/sha256sums
+            $/*.img.gz
+            $/*.buildinfo
+            $/sha256sums
 
       - name: Upload All APK Packages
         uses: actions/upload-artifact@v4
         if: steps.compile.outputs.status == 'success'
         with:
           name: OpenWrt_R3S_All_APK_Packages
-          path: ${{ github.workspace }}/all_apks/
+          path: $/all_apks/
+
