@@ -97,14 +97,16 @@ jobs:
         with:
           name: OpenWrt_R3S_Pure_Firmware
           path: |
-            $/*.img.gz
-            $/*.buildinfo
-            $/sha256sums
+            ${{ env.FIRMWARE_DIR }}/*.img.gz
+            ${{ env.FIRMWARE_DIR }}/*.buildinfo
+            ${{ env.FIRMWARE_DIR }}/sha256sums
 
       - name: Upload All APK Packages
         uses: actions/upload-artifact@v4
         if: steps.compile.outputs.status == 'success'
         with:
           name: OpenWrt_R3S_All_APK_Packages
-          path: $/all_apks/
+          path: ${{ github.workspace }}/all_apks/
+
+      
 
