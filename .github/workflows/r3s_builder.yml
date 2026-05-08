@@ -66,26 +66,27 @@ jobs:
         if: steps.compile.outputs.status == 'success'
         run: |
           cd openwrt/bin/targets/*/*
-
+      
           # 1. 记录固件路径
           echo "FIRMWARE_DIR=$PWD" >> $GITHUB_ENV
-
+      
           # 2. 收集所有 APK 包（必须在删除之前完成）
           mkdir -p $GITHUB_WORKSPACE/all_apks
-
+      
           # 通用软件包（luci、base、packages 等 feeds）
           find $GITHUB_WORKSPACE/openwrt/bin/packages/ -type f -name "*.apk" \
             -exec cp {} $GITHUB_WORKSPACE/all_apks/ \;
-
-          # 内核模块包（kmods）
-          find $GITHUB_WORKSPACE/openwrt/bin/targets/ -type d -name "packages" \
-            -exec find {} -type f -name "*.apk" -exec cp {} $GITHUB_WORKSPACE/all_apks/ \; \;
-
+      
+          # 内核模块包（kmods）—— 直接搜 targets 下所有 .apk
+          find $GITHUB_WORKSPACE/openwrt/bin/targets/ -type f -name "*.apk" \
+            -exec cp {} $GITHUB_WORKSPACE/all_apks/ \;
+      
           # 3. 删除不需要的大型包（ImageBuilder, Toolchain, Debug）
           rm -rf openwrt-imagebuilder-*
           rm -rf openwrt-toolchain-*
           rm -rf kernel-debug.tar.zst
           rm -rf packages
+
 
       - name: Upload Firmware
         uses: actions/upload-artifact@v4
