@@ -63,24 +63,39 @@ jobs:
           echo "status=success" >> $GITHUB_OUTPUT
 
       - name: Organize Files
+        if: steps.compile.outputs.status == 'success'
         run: |
-          # 进入固件目录
           cd openwrt/bin/targets/*/*
-          # 记录当前路径（固件和 kmods 所在地）
-          echo "FIRMWARE_DIR=$PWD" >> $GITHUB_ENV
-          # 删除固件目录下的 packages 副本，节省上传时间和空间
+          
+          # 1. 删除不需要的大型包（ImageBuilder, Toolchain, Debug）
+          rm -rf openwrt-imagebuilder-*
+          rm -rf openwrt-toolchain-*
+          rm -rf kernel-debug.tar.zst
           rm -rf packages
+          
+          # 2. 记录固件路径
+          echo "FIRMWARE_DIR=$PWD" >> $GITHUB_ENV
+          
+          # 3. 抓取新的 APK 软件包
+          mkdir -p $GITHUB_WORKSPACE/all_apks
+          # 注意：搜索后缀从 .ipk 改为 .apk
+          find $GITHUB_WORKSPACE/openwrt/bin/packages/ -type f -name "*.apk" -exec cp {} $GITHUB_WORKSPACE/all_apks/ \;
 
       - name: Upload Firmware and Kmods
         uses: actions/upload-artifact@v4
+        if: steps.compile.outputs.status == 'success'
         with:
-          name: OpenWrt_R3S_Firmware
-          # 这里包含：固件镜像 + kmods 文件夹
-          path: ${{ env.FIRMWARE_DIR }}/*
+          name: OpenWrt_R3S_Pure_Firmware
+          path: |
+            ${{ env.FIRMWARE_DIR }}/*.img.gz
+            ${{ env.FIRMWARE_DIR }}/kmods/
+            ${{ env.FIRMWARE_DIR }}/*.buildinfo
+            ${{ env.FIRMWARE_DIR }}/sha256sums
 
-      - name: Upload All App Packages
+      - name: Upload All APK Packages
         uses: actions/upload-artifact@v4
+        if: steps.compile.outputs.status == 'success'
         with:
-          name: OpenWrt_R3S_All_Apps
-          # 这里包含：bin/packages 目录下所有的插件包
-          path: openwrt/bin/packages/
+          name: OpenWrt_R3S_All_APK_Packages
+          # 抓取整理好的 .apk 文件
+          path: ${{ github.workspace }}/all_apks/
