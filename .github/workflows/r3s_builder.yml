@@ -108,5 +108,14 @@ jobs:
           name: OpenWrt_R3S_All_APK_Packages
           path: ${{ github.workspace }}/all_apks/
 
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        if: steps.compile.outputs.status == 'success'
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ${{ github.workspace }}/structured_apks
+          publish_branch: gh-pages  # 将包发布到这个分支
+          force_orphan: true         # 每次编译只保留最新的包，防止仓库体积无限膨胀
+
       
 
