@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "architecture": "aarch64_generic",
+  "packages": {
+    "attendedsysupgrade-common": "9",
+    "cgi-io": "2025.12.11~658b14bd-r1",
+    "openssh-sftp-server": "10.2_p1-r1",
+    "owut": "2026.01.13~2526d84b-r1"
+  }
+}
