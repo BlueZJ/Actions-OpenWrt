@@ -83,6 +83,27 @@ jobs:
             cp -r "$GITHUB_WORKSPACE/openwrt/bin/targets" "$REPO_BASE/"
           fi
 
+          # 关键新增：复制 APK 签名公钥到 Pages 根目录
+          mkdir -p "$PAGES_ROOT/keys"
+          if [ -f "$GITHUB_WORKSPACE/openwrt/key-build.pub" ]; then
+            cp "$GITHUB_WORKSPACE/openwrt/key-build.pub" "$PAGES_ROOT/keys/"
+          fi
+          # OpenWrt 25.x APK 使用的公钥可能是这个名字
+          if [ -f "$GITHUB_WORKSPACE/openwrt/public-key.pem" ]; then
+            cp "$GITHUB_WORKSPACE/openwrt/public-key.pem" "$PAGES_ROOT/keys/"
+          fi
+          # 从 staging_dir 中查找 apk 公钥（最可靠的位置）
+          find "$GITHUB_WORKSPACE/openwrt/staging_dir" -name "*.pem" -path "*/etc/apk/keys/*" -exec cp {} "$PAGES_ROOT/keys/" \; 2>/dev/null || true
+          # 从已编译的 rootfs 中提取（最终位置）
+          find "$GITHUB_WORKSPACE/openwrt/build_dir" -path "*/root-*/etc/apk/keys/*" -type f -exec cp {} "$PAGES_ROOT/keys/" \; 2>/dev/null || true
+      
+          echo "===== Public keys collected ====="
+          ls -la "$PAGES_ROOT/keys/" || echo "No keys found"
+
+          echo "===== Verify signed index ====="
+          find "$REPO_BASE" -name "packages.adb" -exec sh -c 'echo "{}:"; head -c 64 "{}" | xxd | head -2' \;
+
+
           # 3. 清理无用的大文件，避免 Pages 超出 1GB 限制
           find "$REPO_BASE" -name "openwrt-imagebuilder-*" -exec rm -rf {} + 2>/dev/null || true
           find "$REPO_BASE" -name "openwrt-toolchain-*" -exec rm -rf {} + 2>/dev/null || true
