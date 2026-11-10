@@ -14,14 +14,14 @@ on:
 
 env:
   REPO_URL: https://github.com/openwrt/openwrt.git
-  CONFIG_FILE: 'r3s_eBTF.config'·
+  CONFIG_FILE: 'r3s_eBTF.config'
   TZ: Asia/Shanghai
   
   # ⚠️ 必须修改：替换为你真实的 GitHub 用户名和仓库名
   PAGES_BASE_URL: 'https://BlueZJ.github.io/Actions-OpenWrt'
   
-  # R3S 硬件参数 (用于拼接 APK 仓库路径)
-  TARGET_ARCH: 'aarch64_cortex-a55'
+  # R3S 硬件参数
+  TARGET_ARCH: 'aarch64_cortex-a53'
   TARGET_SUBTARGET: 'rockchip/armv8'
 
 permissions:
@@ -50,7 +50,7 @@ jobs:
           sudo apt-get install -y build-essential flex bison g++ gawk \
             gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
             python3-pyelftools python3-setuptools rsync swig unzip zlib1g-dev \
-            file wget dwarves qemu-utils
+            file wget dwarves qemu-utils openssl
 
       - name: Clone OpenWrt Source
         run: |
@@ -66,22 +66,28 @@ jobs:
         run: |
           [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
           cd openwrt
-          
-          # 强制开启 APK 签名 (25.x 必须)
           echo "CONFIG_SIGNED_PACKAGES=y" >> .config
           echo "CONFIG_SIGNATURE_CHECK=y" >> .config
-          
           make defconfig
 
-      - name: Inject Custom APK Repository
+      - name: 🌟 Pre-generate Keys & Inject Files (核心修复)
         run: |
           cd openwrt
-          mkdir -p files/etc/apk/repositories.d
           
+          # 1. 预生成 RSA 密钥对 (OpenWrt 检测到 key-build.pem 存在会直接使用，不会重新生成)
+          echo "🔑 Generating RSA keys for APK signing..."
+          openssl genrsa -out key-build.pem 2048
+          openssl rsa -in key-build.pem -pubout -out key-build.pub
+          
+          # 2. 将公钥注入到固件的 rootfs 覆盖目录 (确保刷机后 /etc/apk/keys/ 有公钥)
+          mkdir -p files/etc/apk/keys
+          cp key-build.pub files/etc/apk/keys/
+          
+          # 3. 注入自定义软件源地址
+          mkdir -p files/etc/apk/repositories.d
           VER="${{ inputs.openwrt_version }}"
           BASE="${{ env.PAGES_BASE_URL }}/releases/${VER}"
           
-          # 写入完整的 APK 仓库路径 (Target + Packages)
           cat > files/etc/apk/repositories.d/custom.list <<EOF
 ${BASE}/targets/${{ env.TARGET_SUBTARGET }}/packages
 ${BASE}/packages/${{ env.TARGET_ARCH }}/base
@@ -91,7 +97,9 @@ ${BASE}/packages/${{ env.TARGET_ARCH }}/routing
 ${BASE}/packages/${{ env.TARGET_ARCH }}/telephony
 EOF
           
-          echo "✅ Injected custom repositories for version ${VER}"
+          echo "✅ Keys generated and injected into files/"
+          ls -la files/etc/apk/keys/
+          echo "✅ Custom repositories injected:"
           cat files/etc/apk/repositories.d/custom.list
 
       - name: Download Packages
@@ -103,10 +111,11 @@ EOF
         id: compile
         run: |
           cd openwrt
+          # 此时 make 会使用我们预生成的 key-build.pem 进行签名，并将 files/ 打包进 rootfs
           make -j$(nproc) V=s || make -j1 V=s
           echo "status=success" >> $GITHUB_OUTPUT
 
-      - name: Organize Pages & Extract Keys
+      - name: Organize Pages & Upload Keys
         if: steps.compile.outputs.status == 'success'
         run: |
           PAGES_ROOT="$GITHUB_WORKSPACE/pages_root"
@@ -114,30 +123,18 @@ EOF
           REPO_BASE="$PAGES_ROOT/releases/${VER}"
           
           mkdir -p "$REPO_BASE"
+          mkdir -p "$PAGES_ROOT/keys"
 
-          # 1. 复制软件包目录结构
+          # 1. 复制软件包
           [ -d "$GITHUB_WORKSPACE/openwrt/bin/packages" ] && cp -r "$GITHUB_WORKSPACE/openwrt/bin/packages" "$REPO_BASE/"
           [ -d "$GITHUB_WORKSPACE/openwrt/bin/targets" ] && cp -r "$GITHUB_WORKSPACE/openwrt/bin/targets" "$REPO_BASE/"
 
-          # 2. 提取 APK 公钥并同步到固件和 Pages
-          mkdir -p "$PAGES_ROOT/keys"
-          mkdir -p "$GITHUB_WORKSPACE/openwrt/files/etc/apk/keys"
-          
-          # 从 staging_dir 提取 .pem 公钥
-          find "$GITHUB_WORKSPACE/openwrt/staging_dir" -name "*.pem" -path "*/etc/apk/keys/*" -exec cp {} "$PAGES_ROOT/keys/" \; 2>/dev/null || true
-          # 从 build_dir rootfs 提取 (备用)
-          find "$GITHUB_WORKSPACE/openwrt/build_dir" -name "*.pem" -path "*/etc/apk/keys/*" -type f -exec cp {} "$PAGES_ROOT/keys/" \; 2>/dev/null || true
-          
-          # 将公钥复制回固件 files 目录 (确保刷机后系统自带公钥)
-          cp "$PAGES_ROOT/keys/"*.pem "$GITHUB_WORKSPACE/openwrt/files/etc/apk/keys/" 2>/dev/null || true
-
-          echo "🔑 Collected Keys:"
-          ls -la "$PAGES_ROOT/keys/" || echo "⚠️ WARNING: No keys found!"
+          # 2. 将预生成的公钥发布到 Pages (方便用户手动下载或验证)
+          cp "$GITHUB_WORKSPACE/openwrt/key-build.pub" "$PAGES_ROOT/keys/"
 
           # 3. 清理大文件
           find "$REPO_BASE" \( -name "openwrt-imagebuilder-*" -o -name "openwrt-toolchain-*" -o -name "kernel-debug.tar.zst" -o -name "*-rootfs.tar.zst" \) -exec rm -rf {} + 2>/dev/null || true
 
-          # 4. 基础文件
           echo "<h1>OpenWrt ${VER} APK Repository</h1>" > "$PAGES_ROOT/index.html"
           touch "$PAGES_ROOT/.nojekyll"
 
