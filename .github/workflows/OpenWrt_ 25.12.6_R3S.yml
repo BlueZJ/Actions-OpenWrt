@@ -224,13 +224,13 @@ jobs:
           BASE="${{ env.PAGES_BASE_URL }}/releases/${VER}"
           
           cat > files/etc/apk/repositories.d/custom.list <<EOF
-${BASE}/targets/${{ env.TARGET_SUBTARGET }}/packages
-${BASE}/packages/${{ env.TARGET_ARCH }}/base
-${BASE}/packages/${{ env.TARGET_ARCH }}/luci
-${BASE}/packages/${{ env.TARGET_ARCH }}/packages
-${BASE}/packages/${{ env.TARGET_ARCH }}/routing
-${BASE}/packages/${{ env.TARGET_ARCH }}/telephony
-EOF
+          ${BASE}/targets/${{ env.TARGET_SUBTARGET }}/packages
+          ${BASE}/packages/${{ env.TARGET_ARCH }}/base
+          ${BASE}/packages/${{ env.TARGET_ARCH }}/luci
+          ${BASE}/packages/${{ env.TARGET_ARCH }}/packages
+          ${BASE}/packages/${{ env.TARGET_ARCH }}/routing
+          ${BASE}/packages/${{ env.TARGET_ARCH }}/telephony
+          EOF
           
           echo "✅ Keys generated and injected into files/"
           ls -la files/etc/apk/keys/
