@@ -14,11 +14,11 @@ on:
 
 env:
   REPO_URL: https://github.com/openwrt/openwrt.git
-  CONFIG_FILE: 'r3s.config'
+  CONFIG_FILE: 'r3s_eBTF.config'·
   TZ: Asia/Shanghai
   
   # ⚠️ 必须修改：替换为你真实的 GitHub 用户名和仓库名
-  PAGES_BASE_URL: 'https://YOUR_USERNAME.github.io/YOUR_REPO_NAME'
+  PAGES_BASE_URL: 'https://BlueZJ.github.io/Actions-OpenWrt'
   
   # R3S 硬件参数 (用于拼接 APK 仓库路径)
   TARGET_ARCH: 'aarch64_cortex-a55'
