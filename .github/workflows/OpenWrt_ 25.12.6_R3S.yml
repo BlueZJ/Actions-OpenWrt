@@ -64,11 +64,13 @@ jobs:
 
       - name: Load Config & Force APK Signing
         run: |
-          [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
           cd openwrt
+          [ -e "$GITHUB_WORKSPACE/$CONFIG_FILE" ] || { echo "Error: $CONFIG_FILE not found in repo root"; exit 1; }
+          cp "$GITHUB_WORKSPACE/$CONFIG_FILE" .config
           echo "CONFIG_SIGNED_PACKAGES=y" >> .config
           echo "CONFIG_SIGNATURE_CHECK=y" >> .config
           make defconfig
+
 
       - name: 🌟 Pre-generate Keys & Inject Files (核心修复)
         run: |
