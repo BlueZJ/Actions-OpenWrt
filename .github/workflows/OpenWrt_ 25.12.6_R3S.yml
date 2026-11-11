@@ -38,19 +38,21 @@ jobs:
 
       - name: Free Disk Space
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell /usr/share/swift
-          sudo apt-get -y purge azure-cli google-cloud-sdk mono-devel powershell python3-pyelftools python3-jinja2
-          sudo apt-get autoremove --purge -y
-          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup
+          docker rmi $(docker image ls -q) 2>/dev/null || true
+          df -h        # 不要 apt purge / autoremove
 
       - name: Install Build Dependencies
-        timeout-minutes: 10
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential flex bison g++ gawk \
+          sudo apt-get install -y build-essential clang llvm flex bison g++ gawk \
             gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
-            python3-pyelftools python3-setuptools rsync swig unzip zlib1g-dev \
-            file wget dwarves qemu-utils openssl
+            libelf-dev liblzma-dev pkg-config python3-dev python3-setuptools \
+            python3-pyelftools rsync swig unzip zlib1g-dev file wget dwarves \
+            qemu-utils openssl bc time xxd zstd ccache
+          command -v cc || sudo update-alternatives --install /usr/bin/cc cc /usr/bin/gcc 100
+          cc --version && gcc --version
 
       - name: Clone OpenWrt Source
         run: |
@@ -65,13 +67,14 @@ jobs:
       - name: Load Config & Force APK Signing
         run: |
           cd openwrt
-          [ -e "$GITHUB_WORKSPACE/$CONFIG_FILE" ] || { echo "Error: $CONFIG_FILE not found in repo root"; exit 1; }
           cp "$GITHUB_WORKSPACE/$CONFIG_FILE" .config
           echo "CONFIG_SIGNED_PACKAGES=y" >> .config
           echo "CONFIG_SIGNATURE_CHECK=y" >> .config
-          make -C scripts/config conf V=s
+          # 单独 verbose 编译 host kconfig，真实错误直接暴露
+          make -j1 V=s scripts/config/conf || {
+            echo "===== DEBUG ====="; command -v cc gcc g++; cc --version; df -h
+            make -C scripts/config conf V=1 2>&1 | tail -60; exit 1; }
           make defconfig
-
 
       - name: 🌟 Pre-generate Keys & Inject Files (核心修复)
         run: |
