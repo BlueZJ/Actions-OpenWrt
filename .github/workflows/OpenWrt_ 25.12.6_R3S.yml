@@ -96,6 +96,13 @@ jobs:
           set_conf ALL n
           set_conf ALL_NONSHARED n
 
+          # —— R3S LAN 驱动必须进固件：=m 只编不装！——
+          set_conf PACKAGE_kmod-r8169 y
+          set_conf PACKAGE_r8169-firmware y
+          set_conf PACKAGE_kmod-phy-realtek y
+          set_conf PACKAGE_kmod-libphy y
+          set_conf PACKAGE_kmod-mii y
+
           # —— 关掉耗时/占盘的发布级选项（不影响固件内容与依赖）——
           set_conf BUILDBOT n              # 关掉后 base-files 会自动装签名公钥
           set_conf IB n
@@ -116,6 +123,16 @@ jobs:
           echo '===== 关键开关复核 ====='
           grep -E '^(CONFIG_ALL_KMODS|CONFIG_USE_APK|CONFIG_SIGNED_PACKAGES|CONFIG_KERNEL_DEBUG_INFO_BTF|CONFIG_TARGET_ARCH_PACKAGES)=|^# CONFIG_(BUILDBOT|IB|MAKE_TOOLCHAIN|GDB|COLLECT_KERNEL_DEBUG|CCACHE) is not set' .config
           df -h
+          for p in PACKAGE_kmod-r8169 PACKAGE_r8169-firmware; do
+            grep -q "^CONFIG_$p=y$" .config && continue
+            echo "⚠️ $p 被降回 m，重新钉死"
+            sed -i "/^CONFIG_$p=/d; /^# CONFIG_$p is not set/d" .config
+            printf 'CONFIG_%s=y\n' "$p" >> .config
+            make defconfig
+          done
+          grep -E '^(CONFIG_PACKAGE_kmod-r8169|CONFIG_PACKAGE_r8169-firmware|CONFIG_ALL_KMODS)=' .config
+          grep -q '^CONFIG_PACKAGE_kmod-r8169=y' .config || {
+            echo "::error::kmod-r8169 仍不是 =y，停止构建"; exit 1; }
 
       - name: Prepare APK Keys & Rootfs Overlay
         env:
