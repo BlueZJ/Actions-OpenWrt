@@ -1,4 +1,4 @@
-name: R3S eBTF
+name: Build OpenWrt 25.12.6 R3S (Custom APK Repo)
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ concurrency:
 
 env:
   REPO_URL: https://github.com/openwrt/openwrt.git
-  CONFIG_FILE: 'r3s_eBTF.config'
+  CONFIG_FILE: 'offocal.config'
   TZ: Asia/Shanghai
   # ⚠️ 改成你自己的 <用户名>.github.io/<仓库名>
   PAGES_BASE_URL: 'https://BlueZJ.github.io/Actions-OpenWrt'
@@ -86,11 +86,12 @@ jobs:
 
           VER="${{ inputs.openwrt_version }}"
 
-        # —— 版本与官方源地址保持一致 ——
+          # —— 版本与官方源地址保持一致 ——
           set_conf VERSION_NUMBER "\"$VER\""
           set_conf VERSION_REPO "\"https://downloads.openwrt.org/releases/$VER\""
 
-          cat my.config >> .config
+          [ -e "$GITHUB_WORKSPACE/my.config" ] || { echo "Error: my.config not found in repo root"; exit 1; }
+          cat "$GITHUB_WORKSPACE/my.config" >> .config
 
           make defconfig
           echo '===== 关键开关复核 ====='
