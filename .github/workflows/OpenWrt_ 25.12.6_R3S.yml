@@ -21,8 +21,8 @@ env:
   PAGES_BASE_URL: 'https://BlueZJ.github.io/Actions-OpenWrt'
   
   # R3S 硬件参数
-  TARGET_ARCH: 'aarch64'
-  TARGET_SUBTARGET: 'rockchip/armv8'
+  PKG_ARCH: 'aarch64'
+  PKG_SUBTARGET: 'rockchip/armv8'
 
 permissions:
   contents: write
@@ -95,12 +95,12 @@ jobs:
           BASE="${{ env.PAGES_BASE_URL }}/releases/${VER}"
           
           cat > files/etc/apk/repositories.d/custom.list <<EOF
-          ${BASE}/targets/${{ env.TARGET_SUBTARGET }}/packages
-          ${BASE}/packages/${{ env.TARGET_ARCH }}/base
-          ${BASE}/packages/${{ env.TARGET_ARCH }}/luci
-          ${BASE}/packages/${{ env.TARGET_ARCH }}/packages
-          ${BASE}/packages/${{ env.TARGET_ARCH }}/routing
-          ${BASE}/packages/${{ env.TARGET_ARCH }}/telephony
+          ${BASE}/targets/${{ env.PKG_SUBTARGET }}/packages
+          ${BASE}/packages/${{ env.PKG_ARCH }}/base
+          ${BASE}/packages/${{ env.PKG_ARCH }}/luci
+          ${BASE}/packages/${{ env.PKG_ARCH }}/packages
+          ${BASE}/packages/${{ env.PKG_ARCH }}/routing
+          ${BASE}/packages/${{ env.PKG_ARCH }}/telephony
           EOF
           
           echo "✅ Keys generated and injected into files/"
