@@ -1,4 +1,4 @@
-name: Build OpenWrt 25.12.6 R3S (Custom APK Repo)
+name: Build OpenWrt 25.12.6 R3S eBTF
 
 on:
   workflow_dispatch:
