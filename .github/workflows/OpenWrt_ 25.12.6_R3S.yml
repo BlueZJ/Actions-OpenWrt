@@ -4,59 +4,67 @@ on:
   workflow_dispatch:
     inputs:
       openwrt_version:
-        description: 'OpenWrt Version (e.g., 25.12.6)'
+        description: 'OpenWrt Version (e.g. 25.12.6)'
         default: '25.12.6'
         required: true
       repo_branch:
-        description: 'Git Branch or Tag (e.g., v25.12.6, openwrt-25.12)'
+        description: 'Git Branch or Tag (e.g. v25.12.6, openwrt-25.12)'
         default: 'v25.12.6'
         required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: openwrt-r3s-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   REPO_URL: https://github.com/openwrt/openwrt.git
   CONFIG_FILE: 'r3s_eBTF.config'
   TZ: Asia/Shanghai
-  
-  # ⚠️ 必须修改：替换为你真实的 GitHub 用户名和仓库名
+  # ⚠️ 改成你自己的 <用户名>.github.io/<仓库名>
   PAGES_BASE_URL: 'https://BlueZJ.github.io/Actions-OpenWrt'
-  
-  # R3S 硬件参数
-  PKG_ARCH: 'aarch64'
+  # ⚠️ 不要命名为 TARGET_ARCH：它是 GNU make 内建变量(COMPILE.c 里含 $(TARGET_ARCH))，
+  #    会导致 `cc aarch64 -c conf.c` 这类错误。PKG_ARCH 必须是 CONFIG_TARGET_ARCH_PACKAGES 的值。
+  PKG_ARCH: 'aarch64_generic'
   PKG_SUBTARGET: 'rockchip/armv8'
-
-permissions:
-  contents: write
-  pages: write
-  id-token: write
 
 jobs:
   build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 350          # 免费 runner 单 job 上限 6h
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Free Disk Space
         run: |
+          # 只删目录，绝不 apt purge / autoremove（会破坏预装工具链）
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-                      /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup
+                      /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup \
+                      /opt/hostedtoolcache/CodeQL /usr/local/lib/node_modules
           docker rmi $(docker image ls -q) 2>/dev/null || true
-          df -h        # 不要 apt purge / autoremove
+          df -h
 
       - name: Install Build Dependencies
+        timeout-minutes: 15
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang llvm flex bison g++ gawk \
-            gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
-            libelf-dev liblzma-dev pkg-config python3-dev python3-setuptools \
-            python3-pyelftools rsync swig unzip zlib1g-dev file wget dwarves \
-            qemu-utils openssl bc time xxd zstd ccache
-          command -v cc || sudo update-alternatives --install /usr/bin/cc cc /usr/bin/gcc 100
-          cc --version && gcc --version
+          sudo apt-get install -y \
+            build-essential clang llvm flex bison g++ gawk gcc-multilib g++-multilib \
+            gettext git libncurses-dev libssl-dev libelf-dev liblzma-dev libbsd-dev \
+            pkg-config python3-dev python3-setuptools python3-pyelftools \
+            rsync swig unzip zlib1g-dev file wget dwarves qemu-utils openssl \
+            bc time xxd zstd xz-utils bzip2 patch curl device-tree-compiler
+          # scripts/config 用 make 默认 CC=cc，而 prereq 只检查 gcc，这里兜底
+          command -v cc >/dev/null || sudo update-alternatives --install /usr/bin/cc cc /usr/bin/gcc 100
+          cc --version && gcc --version && clang --version | head -1
 
       - name: Clone OpenWrt Source
         run: |
-          git clone $REPO_URL --branch ${{ inputs.repo_branch }} --depth 1 openwrt
+          git clone "$REPO_URL" --branch "${{ inputs.repo_branch }}" --depth 1 openwrt
+          cd openwrt && git log -1 --oneline
 
       - name: Update & Install Feeds
         run: |
@@ -64,98 +72,150 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Load Config & Force APK Signing
+      - name: Load Config (trim buildbot options, keep ALL_KMODS)
         run: |
           cd openwrt
+          [ -e "$GITHUB_WORKSPACE/$CONFIG_FILE" ] || { echo "Error: $CONFIG_FILE not found in repo root"; exit 1; }
           cp "$GITHUB_WORKSPACE/$CONFIG_FILE" .config
-          echo "CONFIG_SIGNED_PACKAGES=y" >> .config
-          echo "CONFIG_SIGNATURE_CHECK=y" >> .config
-          # 单独 verbose 编译 host kconfig，真实错误直接暴露
-          make -j1 V=s scripts/config/conf || {
-            echo "===== DEBUG ====="; command -v cc gcc g++; cc --version; df -h
-            make -C scripts/config conf V=1 2>&1 | tail -60; exit 1; }
-          make defconfig
 
-      - name: 🌟 Pre-generate Keys & Inject Files (核心修复)
+          set_conf() {  # $1=符号(不带 CONFIG_)  $2=y|n|带引号的字符串
+            sed -i "/^CONFIG_$1=/d; /^# CONFIG_$1 is not set/d" .config
+            if [ "$2" = "n" ]; then printf '# CONFIG_%s is not set\n' "$1" >> .config
+            else printf 'CONFIG_%s=%s\n' "$1" "$2" >> .config; fi
+          }
+
+          VER="${{ inputs.openwrt_version }}"
+
+          # —— 签名 / 包管理 ——
+          set_conf USE_APK y
+          set_conf SIGNED_PACKAGES y
+          set_conf SIGNATURE_CHECK y
+
+          # —— 保留全量 kmod：以后才能从自建源装 kmod（kernel ABI 必须自洽）——
+          set_conf ALL_KMODS y
+          set_conf ALL n
+          set_conf ALL_NONSHARED n
+
+          # —— 关掉耗时/占盘的发布级选项（不影响固件内容与依赖）——
+          set_conf BUILDBOT n              # 关掉后 base-files 会自动装签名公钥
+          set_conf IB n
+          set_conf IB_STANDALONE n
+          set_conf SDK n
+          set_conf MAKE_TOOLCHAIN n
+          set_conf GDB n
+          set_conf COLLECT_KERNEL_DEBUG n  # 不影响 BTF（KERNEL_DEBUG_INFO 仍为 y）
+          set_conf JSON_CYCLONEDX_SBOM n
+          set_conf CCACHE n                # 一次性 runner 无命中收益
+          set_conf AUTOREMOVE y            # 编完删 build_dir，省磁盘
+
+          # —— 版本与官方源地址保持一致 ——
+          set_conf VERSION_NUMBER "\"$VER\""
+          set_conf VERSION_REPO "\"https://downloads.openwrt.org/releases/$VER\""
+
+          make defconfig
+          echo '===== 关键开关复核 ====='
+          grep -E '^(CONFIG_ALL_KMODS|CONFIG_USE_APK|CONFIG_SIGNED_PACKAGES|CONFIG_KERNEL_DEBUG_INFO_BTF|CONFIG_TARGET_ARCH_PACKAGES)=|^# CONFIG_(BUILDBOT|IB|MAKE_TOOLCHAIN|GDB|COLLECT_KERNEL_DEBUG|CCACHE) is not set' .config
+          df -h
+
+      - name: Prepare APK Keys & Rootfs Overlay
+        env:
+          APK_PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
         run: |
           cd openwrt
-          
-          # 1. 预生成 RSA 密钥对 (OpenWrt 检测到 key-build.pem 存在会直接使用，不会重新生成)
-          echo "🔑 Generating RSA keys for APK signing..."
-          openssl genrsa -out key-build.pem 2048
-          openssl rsa -in key-build.pem -pubout -out key-build.pub
-          
-          # 2. 将公钥注入到固件的 rootfs 覆盖目录 (确保刷机后 /etc/apk/keys/ 有公钥)
+          # 25.12 的密钥文件名固定为 private-key.pem / public-key.pem（rules.mk），
+          # 且必须是 EC prime256v1（package/Makefile），不是 RSA、不是 key-build.*
+          if [ -n "$APK_PRIVATE_KEY" ]; then
+            echo '🔑 使用 Secret 中的固定私钥（跨次构建复用同一把钥匙）'
+            printf '%s\n' "$APK_PRIVATE_KEY" > private-key.pem
+          else
+            echo '🔑 未配置 APK_PRIVATE_KEY，本次构建临时生成 EC 密钥'
+            openssl ecparam -name prime256v1 -genkey -noout -out private-key.pem
+          fi
+          chmod 600 private-key.pem
+          openssl ec -in private-key.pem -pubout -out public-key.pem
+
+          # 公钥注入（BUILDBOT=n 时 base-files 也会自动装，同名同内容，双保险）
           mkdir -p files/etc/apk/keys
-          cp key-build.pub files/etc/apk/keys/
-          
-          # 3. 注入自定义软件源地址
+          cp public-key.pem files/etc/apk/keys/public-key.pem
+
           mkdir -p files/etc/apk/repositories.d
-          VER="${{ inputs.openwrt_version }}"
-          BASE="${{ env.PAGES_BASE_URL }}/releases/${VER}"
-          
+          # 覆盖官方源，避免设备仍去 downloads.openwrt.org 拉索引（签名/ABI 都不匹配）
+          : > files/etc/apk/repositories.d/distfeeds.list
+          BASE="${PAGES_BASE_URL}/releases/${{ inputs.openwrt_version }}"
           cat > files/etc/apk/repositories.d/custom.list <<EOF
-          ${BASE}/targets/${{ env.PKG_SUBTARGET }}/packages
-          ${BASE}/packages/${{ env.PKG_ARCH }}/base
-          ${BASE}/packages/${{ env.PKG_ARCH }}/luci
-          ${BASE}/packages/${{ env.PKG_ARCH }}/packages
-          ${BASE}/packages/${{ env.PKG_ARCH }}/routing
-          ${BASE}/packages/${{ env.PKG_ARCH }}/telephony
+          ${BASE}/targets/${PKG_SUBTARGET}/packages/packages.adb
+          ${BASE}/packages/${PKG_ARCH}/base/packages.adb
+          ${BASE}/packages/${PKG_ARCH}/luci/packages.adb
+          ${BASE}/packages/${PKG_ARCH}/packages/packages.adb
+          ${BASE}/packages/${PKG_ARCH}/routing/packages.adb
+          ${BASE}/packages/${PKG_ARCH}/telephony/packages.adb
           EOF
-          
-          echo "✅ Keys generated and injected into files/"
-          ls -la files/etc/apk/keys/
-          echo "✅ Custom repositories injected:"
-          cat files/etc/apk/repositories.d/custom.list
+          echo '===== 注入的软件源 ====='; cat files/etc/apk/repositories.d/custom.list
 
       - name: Download Packages
         run: |
           cd openwrt
-          make download -j8
+          make download -j8 || make download -j1 V=s
+          df -h
 
       - name: Build Firmware
         id: compile
         run: |
           cd openwrt
-          # 此时 make 会使用我们预生成的 key-build.pem 进行签名，并将 files/ 打包进 rootfs
-          make -j$(nproc) V=s || make -j1 V=s
-          echo "status=success" >> $GITHUB_OUTPUT
+          # IGNORE_ERRORS=1：个别冷门 kmod 编译失败不中断整体（ALL_KMODS 必备）
+          make -j"$(nproc)" IGNORE_ERRORS=1 || make -j1 V=s IGNORE_ERRORS=1
+          FW_DIR="$(ls -d "$PWD"/bin/targets/*/* | head -n1)"
+          echo "firmware_dir=$FW_DIR" >> "$GITHUB_OUTPUT"
+          echo "status=success" >> "$GITHUB_OUTPUT"
+          df -h
 
-      - name: Organize Pages & Upload Keys
+      - name: Generate Package Index (packages.adb)
         if: steps.compile.outputs.status == 'success'
         run: |
-          PAGES_ROOT="$GITHUB_WORKSPACE/pages_root"
+          cd openwrt
+          # 默认 world 不生成发布用的每目录索引，必须显式跑 package/index
+          make package/index
+          echo '===== 索引检查 ====='
+          find bin/packages bin/targets -name packages.adb -printf '%p  %s bytes\n' | sort
+
+      - name: Organize Pages
+        if: steps.compile.outputs.status == 'success'
+        run: |
           VER="${{ inputs.openwrt_version }}"
-          REPO_BASE="$PAGES_ROOT/releases/${VER}"
-          
-          mkdir -p "$REPO_BASE"
-          mkdir -p "$PAGES_ROOT/keys"
+          PAGES_ROOT="$GITHUB_WORKSPACE/pages_root"
+          REPO_BASE="$PAGES_ROOT/releases/$VER"
+          mkdir -p "$REPO_BASE" "$PAGES_ROOT/keys"
+          cp -r openwrt/bin/packages "$REPO_BASE/"
+          cp -r openwrt/bin/targets  "$REPO_BASE/"
+          cp openwrt/public-key.pem  "$PAGES_ROOT/keys/public-key.pem"
 
-          # 1. 复制软件包
-          [ -d "$GITHUB_WORKSPACE/openwrt/bin/packages" ] && cp -r "$GITHUB_WORKSPACE/openwrt/bin/packages" "$REPO_BASE/"
-          [ -d "$GITHUB_WORKSPACE/openwrt/bin/targets" ] && cp -r "$GITHUB_WORKSPACE/openwrt/bin/targets" "$REPO_BASE/"
+          # 清理大文件（Pages 站点建议 < 1GB）
+          find "$REPO_BASE" \( -name 'openwrt-imagebuilder-*' -o -name 'openwrt-toolchain-*' \
+               -o -name 'openwrt-sdk-*' -o -name 'kernel-debug*' -o -name '*-rootfs.tar.*' \
+               -o -name '*.bom.cdx.json' \) -exec rm -rf {} + 2>/dev/null || true
 
-          # 2. 将预生成的公钥发布到 Pages (方便用户手动下载或验证)
-          cp "$GITHUB_WORKSPACE/openwrt/key-build.pub" "$PAGES_ROOT/keys/"
-
-          # 3. 清理大文件
-          find "$REPO_BASE" \( -name "openwrt-imagebuilder-*" -o -name "openwrt-toolchain-*" -o -name "kernel-debug.tar.zst" -o -name "*-rootfs.tar.zst" \) -exec rm -rf {} + 2>/dev/null || true
-
-          echo "<h1>OpenWrt ${VER} APK Repository</h1>" > "$PAGES_ROOT/index.html"
+          {
+            echo "<h1>OpenWrt ${VER} · NanoPi R3S · APK Repository</h1>"
+            echo "<p>Public key: <a href='./keys/public-key.pem'>public-key.pem</a></p>"
+            echo "<p>Repo list: <code>/etc/apk/repositories.d/custom.list</code></p>"
+            echo "<pre>$(cd "$PAGES_ROOT" && find releases -maxdepth 4 -type d | sort)</pre>"
+          } > "$PAGES_ROOT/index.html"
           touch "$PAGES_ROOT/.nojekyll"
+          du -sh "$PAGES_ROOT"
 
-          FIRMWARE_DIR=$(ls -d $GITHUB_WORKSPACE/openwrt/bin/targets/*/* | head -n 1)
-          echo "FIRMWARE_DIR=$FIRMWARE_DIR" >> $GITHUB_ENV
-
-      - name: Upload Firmware
-        uses: actions/upload-artifact@v4
+      - name: Upload Firmware & Build Metadata
+        uses: actions/upload-artifact@v7
         if: steps.compile.outputs.status == 'success'
         with:
           name: OpenWrt_${{ inputs.openwrt_version }}_R3S
+          if-no-files-found: error
           path: |
-            ${{ env.FIRMWARE_DIR }}/*.img.gz
-            ${{ env.FIRMWARE_DIR }}/*.buildinfo
-            ${{ env.FIRMWARE_DIR }}/sha256sums
+            ${{ steps.compile.outputs.firmware_dir }}/*.img.gz
+            ${{ steps.compile.outputs.firmware_dir }}/*.manifest
+            ${{ steps.compile.outputs.firmware_dir }}/*.buildinfo
+            ${{ steps.compile.outputs.firmware_dir }}/sha256sums
+            openwrt/.config
+            openwrt/public-key.pem
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
@@ -164,5 +224,6 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./pages_root
           publish_branch: gh-pages
-          force_orphan: true
+          force_orphan: true      # 单提交，仓库不膨胀
+          keep_files: true        # 但保留已有版本目录，历史版本不被清空
           commit_message: "Deploy OpenWrt ${{ inputs.openwrt_version }} APK Repo"
