@@ -69,6 +69,7 @@ jobs:
           cp "$GITHUB_WORKSPACE/$CONFIG_FILE" .config
           echo "CONFIG_SIGNED_PACKAGES=y" >> .config
           echo "CONFIG_SIGNATURE_CHECK=y" >> .config
+          make -C scripts/config conf V=s
           make defconfig
 
 
