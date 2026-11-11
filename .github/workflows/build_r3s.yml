@@ -21,7 +21,7 @@ concurrency:
 
 env:
   REPO_URL: https://github.com/openwrt/openwrt.git
-  CONFIG_FILE: 'offocal.config'
+  CONFIG_FILE: 'offfical_r3s.config'
   TZ: Asia/Shanghai
   # ⚠️ 改成你自己的 <用户名>.github.io/<仓库名>
   PAGES_BASE_URL: 'https://BlueZJ.github.io/Actions-OpenWrt'
