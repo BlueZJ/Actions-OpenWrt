@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "architecture": "aarch64_generic",
+  "packages": {
+    "attendedsysupgrade-common": "10",
+    "cgi-io": "2026.07.21~31cb3c89-r1",
+    "curl": "8.22.0-r1",
+    "libcurl": "8.22.0-r1",
+    "libnghttp2": "1.70.0-r1",
+    "owut": "2026.08.30~9b51eeec-r1"
+  }
+}
