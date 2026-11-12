@@ -94,13 +94,8 @@ jobs:
           cat "$GITHUB_WORKSPACE/my.config" >> .config
 
           make defconfig
-          echo '===== 关键开关复核 ====='
-          grep -q '^CONFIG_PACKAGE_kmod-r8169=y' .config || { echo "::error::LAN 驱动不是 =y"; exit 1; }
-          grep -E '^(CONFIG_PACKAGE_kmod-r8169|CONFIG_PACKAGE_r8169-firmware|CONFIG_PACKAGE_tc-bpf|CONFIG_PACKAGE_bpftool-full|CONFIG_KERNEL_DEBUG_INFO_BTF|CONFIG_KERNEL_MODULE_ALLOW_BTF_MISMATCH)=' .config
-          grep -E '^CONFIG_PACKAGE_(ppp|luci-app-sqm|luci-app-upnp)=' .config   # 应该无输出
 
-          grep -E '^(CONFIG_ALL_KMODS|CONFIG_USE_APK|CONFIG_SIGNED_PACKAGES|CONFIG_KERNEL_DEBUG_INFO_BTF|CONFIG_TARGET_ARCH_PACKAGES)=|^# CONFIG_(BUILDBOT|IB|MAKE_TOOLCHAIN|GDB|COLLECT_KERNEL_DEBUG|CCACHE) is not set' .config
-          df -h
+          # 兜底：若被 ALL_KMODS 降回 m，再钉一次
           for p in PACKAGE_kmod-r8169 PACKAGE_r8169-firmware; do
             grep -q "^CONFIG_$p=y$" .config && continue
             echo "⚠️ $p 被降回 m，重新钉死"
@@ -108,9 +103,17 @@ jobs:
             printf 'CONFIG_%s=y\n' "$p" >> .config
             make defconfig
           done
-          grep -E '^(CONFIG_PACKAGE_kmod-r8169|CONFIG_PACKAGE_r8169-firmware|CONFIG_ALL_KMODS)=' .config
-          grep -q '^CONFIG_PACKAGE_kmod-r8169=y' .config || {
-            echo "::error::kmod-r8169 仍不是 =y，停止构建"; exit 1; }
+
+          echo "===== 关键开关复核 ====="
+          grep -E '^(CONFIG_PACKAGE_kmod-r8169|CONFIG_PACKAGE_r8169-firmware|CONFIG_PACKAGE_tc-bpf|CONFIG_PACKAGE_bpftool-full|CONFIG_KERNEL_DEBUG_INFO_BTF|CONFIG_KERNEL_MODULE_ALLOW_BTF_MISMATCH)=' .config
+
+          grep -q '^CONFIG_PACKAGE_kmod-r8169=y'    .config || { echo "::error::kmod-r8169 不是 =y"; exit 1; }
+          grep -q '^CONFIG_PACKAGE_r8169-firmware=y' .config || { echo "::error::r8169-firmware 不是 =y"; exit 1; }
+
+          if grep -qE '^CONFIG_PACKAGE_(ppp|ppp-mod-pppoe|luci-app-sqm|luci-app-upnp)=y' .config; then
+            echo "::error::PPPoE / SQM / UPnP 仍被启用"; exit 1
+          fi
+          echo "✅ 校验通过"
 
       - name: Prepare APK Keys & Rootfs Overlay
         env:
